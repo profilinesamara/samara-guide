@@ -207,6 +207,40 @@ footer p { margin-top: 8px; }
   .card-overview { font-size: 23px; }
   .cards .body { padding: 14px 16px 5px; }
 }
+
+/* Keep venue details out of the catalog grid. */
+html { scrollbar-gutter: stable; }
+html:has(.venue-dialog[open]) { overflow: hidden; }
+.venue-dialog {
+  width: min(100% - 24px, 590px);
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--rule);
+  border-top: 4px solid var(--volga);
+  border-radius: 7px 7px 24px 7px;
+  background: var(--paper);
+  color: var(--volga);
+}
+.venue-dialog::backdrop { background: #14233890; }
+.venue-sheet { display: grid; grid-template-rows: auto minmax(0, 1fr); max-height: calc(100dvh - 40px); }
+.venue-sheet-heading { display: flex; justify-content: space-between; align-items: start; gap: 12px; padding: 16px 20px 12px; border-bottom: 1px solid var(--rule); }
+.venue-sheet-heading h2 { margin: 0 0 6px; font-size: clamp(23px, 5vw, 32px); overflow-wrap: anywhere; }
+.venue-sheet-heading p { font-size: 13px; }
+.venue-close { flex: none; min-width: 44px; min-height: 44px; border: 1px solid var(--rule); border-radius: 5px; color: inherit; background: transparent; cursor: pointer; font-size: 23px; }
+.venue-sheet-scroll { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 12px 20px 18px; }
+.venue-sheet-actions { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.venue-sheet-actions a { display: inline-flex; align-items: center; min-height: 44px; font-size: 14px; font-weight: 700; }
+.venue-sheet-actions a:first-child { padding: 4px 12px; border-radius: 5px; background: var(--volga); color: var(--paper); text-decoration: none; }
+.venue-dialog .detail-body p { margin: 8px 0 12px; }
+.venue-dialog .detail-body .reel-frame { width: min(100%, 420px); }
+.venue-dialog .detail-links { display: none; }
+.venue-dialog .rating { margin-top: 8px; padding-inline: 0; }
+@media (max-width: 680px) {
+  .venue-sheet { max-height: calc(100dvh - 26px); }
+  .venue-sheet-heading, .venue-sheet-scroll { padding-inline: 16px; }
+}
 </style>
 <script>
 document.addEventListener('error', event => {
@@ -391,7 +425,23 @@ document.addEventListener('load', event => {
 <li>Nonna di Bruni, Ленинградская, 1 — в карточке на Яндекс Картах стоит отметка о временном закрытии. <a href="https://yandex.com/maps/org/nonna_di_bruni/137064274644/panorama/">Карточка адреса</a></li>
 <li>Terrace — нашлись карточка ресторана и банкетные предложения, но зимний график завтраков пока не подтверждён.</li>
 </ul></details><p class="note">Адреса сверены по сайтам заведений и открытым карточкам. Кнопка «Проверить часы» ведёт к источнику по конкретному месту. График заведения и время подачи завтраков могут отличаться. Каталог пополняется по мере проверки адресов. Новые места искали в <a href="https://edagda.ru/restrant">каталоге «Едагда»</a> и <a href="https://where2smoke.net/ru/Samara">справочнике Where2Smoke</a>.</p><p class="note">Для расширения охвата <a href="https://yandex.com/maps/discovery/podborka_eda_zavtrak_samara-51/">подборка Яндекс Карт</a> и <a href="https://www.restoclub.ru/samara/catalog/zavtraki-v-samare-v-restoranah-kafe-i-barah">каталог Restoclub</a>.</p></footer>
-</main><script>
+</main>
+<dialog class="venue-dialog" aria-labelledby="venue-dialog-title" aria-describedby="venue-dialog-address">
+  <div class="venue-sheet">
+    <div class="venue-sheet-heading">
+      <div>
+        <h2 id="venue-dialog-title"></h2>
+        <p id="venue-dialog-address"></p>
+      </div>
+      <button class="venue-close" type="button" aria-label="Закрыть подробности" autofocus>×</button>
+    </div>
+    <div class="venue-sheet-scroll">
+      <div class="venue-sheet-actions"></div>
+      <div class="venue-sheet-content"></div>
+    </div>
+  </div>
+</dialog>
+<script>
 const buttons = [...document.querySelectorAll('.breakfast-times button')];
 const categoryButtons = [...document.querySelectorAll('.categories button')];
 const timeFilters = document.querySelector('.breakfast-times');
@@ -400,6 +450,7 @@ const query = document.querySelector('input[type=search]');
 const zone = document.querySelector('.controls select');
 const mine = document.querySelector('#my-ratings');
 const cards = [...document.querySelectorAll('.cards article')];
+const cardSearchText = cards.map(card => normalizeSearch(card.querySelector('.body').textContent));
 const status = document.querySelector('.status');
 const clearFilters = document.querySelector('#clear-filters');
 const ratingKey = 'samara-breakfast-ratings-v1';
@@ -418,12 +469,12 @@ function update() {
   const term = normalizeSearch(query.value);
   clearFilters.hidden = !(term || zone.value || mine.checked || category || kind !== 'Все');
   let visible = 0;
-  for (const card of cards) {
+  for (const [index, card] of cards.entries()) {
     const matches = (!category || card.dataset.categories.split(' ').includes(category))
       && (!zone.value || card.dataset.zone === zone.value)
       && (kind === 'Все' || card.dataset.kind === kind)
       && (!mine.checked || Boolean(ratings[card.id]))
-      && normalizeSearch(card.querySelector('.body').textContent).includes(term);
+      && cardSearchText[index].includes(term);
     card.hidden = !matches;
     visible += Number(matches);
   }
@@ -464,7 +515,50 @@ for (const link of document.querySelectorAll('.quick a')) {
   });
 }
 
+const venueDialog = document.querySelector('.venue-dialog');
+const venueContent = venueDialog.querySelector('.venue-sheet-content');
+const venueActions = venueDialog.querySelector('.venue-sheet-actions');
+const venueScroll = venueDialog.querySelector('.venue-sheet-scroll');
+const venueTitle = venueDialog.querySelector('h2');
+const venueAddress = venueDialog.querySelector('#venue-dialog-address');
+let activeDetails;
+let activeTrigger;
+
+function restoreVenueDetails() {
+  if (!activeDetails) return;
+  activeDetails.append(...venueContent.children);
+  venueActions.replaceChildren();
+  const returnFocus = activeDetails.closest('article').hidden ? mine : activeTrigger;
+  returnFocus.focus({preventScroll: true});
+  activeDetails = null;
+  activeTrigger = null;
+}
+
+venueDialog.querySelector('.venue-close').addEventListener('click', () => venueDialog.close());
+venueDialog.addEventListener('close', restoreVenueDetails);
+venueDialog.addEventListener('click', event => {
+  if (event.target === venueDialog) venueDialog.close();
+});
+
 for (const card of cards) {
+  const details = card.querySelector('.card-details');
+  const trigger = details.querySelector('summary');
+  if (typeof venueDialog.showModal === 'function') {
+    trigger.setAttribute('aria-haspopup', 'dialog');
+    trigger.addEventListener('click', event => {
+      event.preventDefault();
+      if (venueDialog.open || activeDetails) return;
+      activeDetails = details;
+      activeTrigger = trigger;
+      venueTitle.textContent = card.querySelector('h2').textContent;
+      venueAddress.textContent = [...card.querySelectorAll('.address span')].map(span => span.textContent).join(' · ');
+      const actions = card.querySelectorAll('.links a:not(.review-action), .detail-links a');
+      venueActions.replaceChildren(...[...actions].map(link => link.cloneNode(true)));
+      venueContent.append(details.querySelector('.detail-body'), details.querySelector('.rating'));
+      venueDialog.showModal();
+      venueScroll.scrollTop = 0;
+    });
+  }
   const rating = card.querySelector('.rating');
   const title = card.querySelector('h2').textContent;
   rating.innerHTML = '<span class="rating-label" aria-live="polite"></span>'
